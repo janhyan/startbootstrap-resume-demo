@@ -1,0 +1,65 @@
+name: Deploy application
+
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Setup nodejs
+      uses: actions/setup-node@v4.1.0
+      with:
+        node-version: '16'
+
+    - name: Build dependencies
+      run: npm run build
+
+    - name: Build application
+      run: npm ci
+
+    - name: Test application
+      uses: cypress-io/github-action@v6.7.7
+      timeout-minutes: 3
+      with:
+        browser: chrome
+        start: npm start
+        wait-on: 'http://localhost:3000'
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4.4.3
+      with:
+        name: build-artifact
+        path: dist/
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+    - name: Download  artifacts
+      uses: actions/download-artifact@v4.4.3
+      with:
+        name: build-artifact
+        path: dist/
+
+    - name: Configure AWS
+      uses: aws-actions/configure-aws-credentials@v4.0.2
+      with:
+        aws-region: ap-northeast-1
+        role-to-assume: ${{ secrets.AWS_ROLE }}
+
+    - name: Upload to S3
+      run: |
+        aws s3 sync dist/ s3://bootstrap-resume-v1 --delete
+
+    - name: Invalidate on Cloudfront Cache
+      run: aws cloudfront create-invalidation --distribution-id ${{ secrets.AWS_DISTRIBUTION }} --paths "/*"
